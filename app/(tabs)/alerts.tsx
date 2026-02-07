@@ -282,7 +282,7 @@ export default function AlertsScreen() {
       >
         {/* Header */}
         <View className="flex-row items-center justify-between">
-          <Text className="text-5xl font-extrabold text-gray-900">Alerts</Text>
+          <Text className="text-4xl font-extrabold text-gray-900">Alerts</Text>
 
           <Pressable
             onPress={() => setSettingsOpen(true)}

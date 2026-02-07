@@ -3,8 +3,9 @@ import { Alert, Pressable, ScrollView, Text, View, NativeSyntheticEvent, NativeS
 import { SafeAreaView, useSafeAreaInsets  } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
 import { StatusBar } from "expo-status-bar";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+
 
 type Mode = "AUTO" | "MANUAL";
 
@@ -208,7 +209,7 @@ async function sendFanToEsp32(_fanOn: boolean) {
 export default function Dashboard() {
 
   const insets = useSafeAreaInsets();
-  
+  const tabBarHeight = useBottomTabBarHeight();
 
   // Mock for now. Later: replace smokeValue with Wi-Fi live data.
   const [smokeValue, setSmokeValue] = useState(12);
@@ -264,14 +265,9 @@ export default function Dashboard() {
   }
 
   return (
-    <View className="flex-1 bg-gray-100">
+    <SafeAreaView className="flex-1 bg-gray-100" edges={["top", "left", "right"]}>
       <StatusBar translucent backgroundColor="transparent" style="light" />
-      <ScrollView showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        bounces
-        contentContainerStyle={{
-          paddingTop: 25,
-        }}>
+      <ScrollView showsVerticalScrollIndicator={false} >
         <View className="flex-1 px-5 pt-2 ">
         <Text className="text-lg font-semibold text-gray-500">Kitchen Safety</Text>
         <Text className="mt-2 text-5xl font-extrabold text-gray-900">Dashboard</Text>
@@ -394,21 +390,7 @@ export default function Dashboard() {
           </Pressable>
         </View>
       </View>
-      <View style={{ height: 1200 }} />
       </ScrollView>
-      
-      <BlurView
-        intensity={1}          // lower = less blur
-        tint="default"
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: insets.top + 16, // status bar + a bit below
-        }}
-        pointerEvents="none"
-      />
-    </View>
+    </SafeAreaView>
   );
 }
