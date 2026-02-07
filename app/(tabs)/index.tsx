@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from "react";
-import { Alert, Pressable, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import React, { useMemo, useState, useRef } from "react";
+import { Alert, Pressable, ScrollView, Text, View, NativeSyntheticEvent, NativeScrollEvent } from "react-native";
+import { SafeAreaView, useSafeAreaInsets  } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { StatusBar } from "expo-status-bar";
 
 type Mode = "AUTO" | "MANUAL";
 
@@ -73,9 +75,9 @@ function StatusPill({
   dotColor: string;
 }) {
   return (
-    <View className={`flex-row items-center gap-2 rounded-full px-3 py-1.5 ${bg}`}>
+    <View className={`flex-row items-center gap-2 rounded-full px-4 py-1.5 ${bg}`}>
       <View className="h-2 w-2 rounded-full" style={{ backgroundColor: dotColor }} />
-      <Text className={`text-xs font-extrabold ${textColor}`}>{label}</Text>
+      <Text className={`text-sm font-extrabold ${textColor}`}>{label}</Text>
     </View>
   );
 }
@@ -89,8 +91,8 @@ function GaugeRing({
   max: number;
   strokeColor: string;
 }) {
-  const size = 160;
-  const stroke = 12;
+  const size = 200;
+  const stroke = 14;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
 
@@ -125,8 +127,8 @@ function GaugeRing({
       </Svg>
 
       <View className="absolute inset-0 items-center justify-center">
-        <Text className="text-4xl font-extrabold text-gray-900">{value}</Text>
-        <Text className="mt-1 text-[11px] font-semibold text-gray-500">MG/M³ SMOKE</Text>
+        <Text className="text-6xl font-extrabold text-gray-900">{value}</Text>
+        <Text className="mt-1 text-sm font-semibold text-gray-500">MG/M³ SMOKE</Text>
       </View>
     </View>
   );
@@ -149,15 +151,15 @@ function Tile({
     <Pressable
       disabled={!onPress || disabled}
       onPress={onPress}
-      className={`flex-1 items-center justify-center rounded-2xl border border-gray-200 bg-white px-3 py-4 shadow-sm ${
+      className={`flex-1 items-center justify-center rounded-2xl border border-gray-200 bg-white px-3 py-3 pt-6 shadow-sm ${
         disabled ? "opacity-50" : ""
       }`}
     >
       {icon}
-      <Text className="mt-2 text-[10px] font-extrabold tracking-wide text-gray-500">
+      <Text className="mt-2 text-[11px] font-bold tracking-wide text-gray-500">
         {title}
       </Text>
-      <Text className="mt-1 text-lg font-black text-gray-900">{value}</Text>
+      <Text className="my-4 text-2xl font-black text-gray-900">{value}</Text>
     </Pressable>
   );
 }
@@ -176,7 +178,7 @@ function StatusRow({
   rightTopColor?: string;
 }) {
   return (
-    <View className="flex-row items-center justify-between py-2">
+    <View className="flex-row items-center pl-4 justify-between py-2">
       <View className="flex-row items-center gap-3">
         {icon}
         <Text className="text-[15px] font-bold text-gray-900">{title}</Text>
@@ -204,6 +206,10 @@ async function sendFanToEsp32(_fanOn: boolean) {
 }
 
 export default function Dashboard() {
+
+  const insets = useSafeAreaInsets();
+  
+
   // Mock for now. Later: replace smokeValue with Wi-Fi live data.
   const [smokeValue, setSmokeValue] = useState(12);
 
@@ -258,8 +264,15 @@ export default function Dashboard() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-100">
-      <View className="flex-1 px-5 pt-2">
+    <View className="flex-1 bg-gray-100">
+      <StatusBar translucent backgroundColor="transparent" style="light" />
+      <ScrollView showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        bounces
+        contentContainerStyle={{
+          paddingTop: 25,
+        }}>
+        <View className="flex-1 px-5 pt-2 ">
         <Text className="text-lg font-semibold text-gray-500">Kitchen Safety</Text>
         <Text className="mt-2 text-5xl font-extrabold text-gray-900">Dashboard</Text>
 
@@ -275,22 +288,22 @@ export default function Dashboard() {
             />
           </View>
 
-          <View className="mt-2 items-center">
+          <View className="mt-2 mb-4 items-center">
             <GaugeRing value={smokeValue} max={120} strokeColor={air.ringColor} />
 
-            <Text className="mt-3 text-sm text-gray-500">
+            <Text className="mt-5 text-base font-medium text-gray-500">
               Air quality is{" "}
               <Text className="font-extrabold" style={{ color: air.ringColor }}>
                 {air.qualityLabel}
               </Text>
             </Text>
 
-            <Text className="mt-1 text-xs font-medium text-gray-500">Updated just now</Text>
+            <Text className="mt-1 text-sm font-medium text-gray-400 italic">Updated just now</Text>
           </View>
         </View>
 
         {/* Tiles Row */}
-        <View className="mt-4 flex-row gap-3">
+        <View className="mt-4 flex-row gap-2.5">
           <Tile
             title="FAN STATUS"
             value={fanOn ? "ON" : "OFF"}
@@ -299,7 +312,7 @@ export default function Dashboard() {
             icon={
               <MaterialCommunityIcons
                 name="fan"
-                size={22}
+                size={24}
                 color={fanOn ? "#22C55E" : "#9CA3AF"}
               />
             }
@@ -310,22 +323,22 @@ export default function Dashboard() {
             value={mode}
             disabled={busy}
             onPress={toggleMode}
-            icon={<Ionicons name="sync-outline" size={22} color="#22C55E" />}
+            icon={<Ionicons name="sync-outline" size={24} color="#22C55E" />}
           />
 
           <Tile
             title="FILTER LIFE"
             value="84%"
-            icon={<Ionicons name="funnel-outline" size={22} color="#22C55E" />}
+            icon={<Ionicons name="funnel-outline" size={24} color="#22C55E" />}
           />
         </View>
 
         {/* System Status */}
-        <View className="mt-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <Text className="mb-2 text-xs font-extrabold tracking-wider text-gray-500">
+        <View className="mt-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          <Text className="mb-2 text-base font-extrabold tracking-wider text-gray-500">
             SYSTEM STATUS
           </Text>
-
+    
           <StatusRow
             title="Power Supply"
             icon={
@@ -337,8 +350,6 @@ export default function Dashboard() {
             }
           />
 
-          <View className="my-2 h-[1px] bg-gray-200" />
-
           <StatusRow
             title="Smoke Sensor"
             icon={
@@ -349,8 +360,6 @@ export default function Dashboard() {
               />
             }
           />
-
-          <View className="my-2 h-[1px] bg-gray-200" />
 
           <StatusRow
             title="ESP32 Connectivity"
@@ -385,6 +394,21 @@ export default function Dashboard() {
           </Pressable>
         </View>
       </View>
-    </SafeAreaView>
+      <View style={{ height: 1200 }} />
+      </ScrollView>
+      
+      <BlurView
+        intensity={1}          // lower = less blur
+        tint="default"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: insets.top + 16, // status bar + a bit below
+        }}
+        pointerEvents="none"
+      />
+    </View>
   );
 }
