@@ -34,7 +34,7 @@ export default function AlertHistoryCard({ item }: { item: AlertItem }) {
 
   return (
     <View className="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-      <View className="flex-row items-start justify-between">
+      <View className="flex-row items-center justify-between">
         {/* Left icon */}
         <View
           className={`h-8 w-8 items-center justify-center rounded-full border ${iconStyles.bg} ${iconStyles.ring}`}
