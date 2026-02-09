@@ -350,7 +350,7 @@ export default function Dashboard() {
             title="Smoke Sensor"
             icon={
               <Ionicons
-                name="flame"
+                name="radio"
                 size={18}
                 color={systemStatus.smokeSensor === "OK" ? "#22C55E" : "#EF4444"}
               />
