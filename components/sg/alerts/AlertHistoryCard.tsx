@@ -31,11 +31,13 @@ export default function AlertHistoryCard({ item }: { item: AlertItem }) {
         };
 
   const isFilterDue = item.type === "FILTER_DUE";
+  const hasPeak = !isFilterDue && !!item.peak;
+  const hasDuration = !!item.duration;
+  const hasEfficiency = !!item.efficiency;
 
   return (
     <View className="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
       <View className="flex-row items-center justify-between">
-        {/* Left icon */}
         <View
           className={`h-8 w-8 items-center justify-center rounded-full border ${iconStyles.bg} ${iconStyles.ring}`}
         >
@@ -46,36 +48,53 @@ export default function AlertHistoryCard({ item }: { item: AlertItem }) {
           />
         </View>
 
-        {/* Middle content */}
         <View className="flex-1 px-4">
           <Text className="text-lg font-extrabold text-gray-900">
             {item.title}
           </Text>
 
-          <View className="mt-2 flex-row items-center">
-            <Text className="text-base font-medium text-gray-500">
-              {isFilterDue ? "Efficiency:" : "Peak:"}
-            </Text>
+          {(hasPeak || hasDuration || hasEfficiency) ? (
+            <View className="mt-2 flex-row flex-wrap items-center">
+              {hasEfficiency ? (
+                <>
+                  <Text className="text-base font-medium text-gray-500">
+                    Efficiency:
+                  </Text>
+                  <Text className={`ml-2 text-base font-extrabold ${iconStyles.metricColor}`}>
+                    {item.efficiency}
+                  </Text>
+                </>
+              ) : null}
 
-            <Text className={`ml-2 text-base font-extrabold ${iconStyles.metricColor}`}>
-              {isFilterDue ? item.efficiency ?? "-" : item.peak ?? "-"}
-            </Text>
+              {hasPeak ? (
+                <>
+                  <Text className="text-base font-medium text-gray-500">
+                    Peak:
+                  </Text>
+                  <Text className={`ml-2 text-base font-extrabold ${iconStyles.metricColor}`}>
+                    {item.peak}
+                  </Text>
+                </>
+              ) : null}
 
-            {!isFilterDue ? (
-              <>
+              {hasPeak && hasDuration ? (
                 <View className="mx-4 h-6 w-[1px] bg-gray-200" />
-                <Text className="text-base font-medium text-gray-500">
-                  Duration:
-                </Text>
-                <Text className="ml-2 text-base font-extrabold text-gray-500">
-                  {item.duration ?? "-"}
-                </Text>
-              </>
-            ) : null}
-          </View>
+              ) : null}
+
+              {!hasEfficiency && hasDuration ? (
+                <>
+                  <Text className="text-base font-medium text-gray-500">
+                    Duration:
+                  </Text>
+                  <Text className="ml-2 text-base font-extrabold text-gray-500">
+                    {item.duration}
+                  </Text>
+                </>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
-        {/* Right side */}
         <View className="items-end">
           <SeverityPill severity={item.severity} />
           <Text className="mt-10 text-[13px] font-semibold text-gray-400">
