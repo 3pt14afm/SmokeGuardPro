@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Text } from "react-native";
+import { Alert, Text } from "react-native";
 
 import Screen from "../../components/sg/common/Screen";
 
@@ -9,7 +9,8 @@ import SystemHealthCard from "../../components/sg/device/SystemHealthCard";
 import ThresholdCard from "../../components/sg/device/ThresholdCard";
 
 import { ConnectionInfo, SystemHealth } from "../../types/device";
-import { getEsp32Status } from "@/services/esp32";
+import { getEsp32Status, sendThresholdToEsp32 } from "@/services/esp32";
+import { mapRawThresholdToUi, mapUiThresholdToRaw } from "@/utils/device";
 
 const POLL_MS = 3000;
 
@@ -29,7 +30,6 @@ const DISCONNECTED_HEALTH: SystemHealth = {
 
 export default function DeviceScreen() {
   const [connection, setConnection] = useState<ConnectionInfo>(DISCONNECTED_CONNECTION);
-
   const [bluetoothOn, setBluetoothOn] = useState(false);
   const [bluetoothDeviceName] = useState("SG-Pro-01");
 
@@ -58,6 +58,8 @@ export default function DeviceScreen() {
         sensorCalibration: status.sensor === "DETECTED" ? "Triggered" : "Normal",
         internalTemp: "--",
       });
+
+      setThreshold(mapRawThresholdToUi(status.threshold ?? 1800));
     } catch {
       setConnection(DISCONNECTED_CONNECTION);
       setHealth(DISCONNECTED_HEALTH);
@@ -78,6 +80,23 @@ export default function DeviceScreen() {
     loadStatus();
   }
 
+  async function handleThresholdChange(value: number) {
+    const safeUiValue = Math.max(1, Math.min(120, Math.round(value)));
+    const rawThreshold = mapUiThresholdToRaw(safeUiValue);
+
+    setThreshold(safeUiValue);
+
+    try {
+      await sendThresholdToEsp32(rawThreshold);
+      await loadStatus();
+    } catch {
+      Alert.alert(
+        "Threshold update failed",
+        "Couldn’t update threshold. Check local Wi-Fi connection."
+      );
+    }
+  }
+
   return (
     <Screen>
       <Text className="text-center text-4xl font-extrabold text-gray-900">
@@ -86,15 +105,15 @@ export default function DeviceScreen() {
 
       <ConnectionCard connection={connection} onReconnect={reconnectDevice} />
 
-      <BluetoothCard
+      {/* <BluetoothCard
         bluetoothOn={bluetoothOn}
         onToggle={setBluetoothOn}
         deviceName={bluetoothDeviceName}
-      />
+      /> */}
 
       <SystemHealthCard health={health} />
 
-      <ThresholdCard threshold={threshold} onChange={setThreshold} />
+      <ThresholdCard threshold={threshold} onChange={handleThresholdChange} />
     </Screen>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Text, View } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
@@ -15,6 +15,14 @@ import {
   sendFanToEsp32,
   sendModeToEsp32,
 } from "@/services/esp32";
+import {
+  formatDurationFromMs,
+  getSmokeLevelFromAqi,
+  getTimeLabel,
+  saveFanEvent,
+  saveSmokeReading,
+} from "@/services/history";
+import { startGasAlert, stopGasAlert } from "@/utils/notifications";
 
 const POLL_MS = 2000;
 
@@ -27,6 +35,8 @@ const FALLBACK_STATUS: Esp32Status = {
   connected: false,
   wifiName: undefined,
   ip: undefined,
+  gasValue: 0,
+  threshold: 1800,
 };
 
 export default function Dashboard() {
@@ -35,7 +45,11 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(true);
   const [filterLife] = useState("84%");
 
-  const smokeValue = status.smokeValue;
+  const previousStatusRef = useRef<Esp32Status | null>(null);
+  const fanStartTimeRef = useRef<number | null>(null);
+  const lastSavedSmokeKeyRef = useRef<string | null>(null);
+
+  const smokeValue = status.smokeValue ?? 0;
 
   const systemStatus: SystemStatus = {
     powerSupply: status.connected ? "OK" : "ISSUE",
@@ -49,17 +63,112 @@ export default function Dashboard() {
 
   const air = useMemo(() => getAirState(smokeValue), [smokeValue]);
 
+  async function saveDashboardHistory(next: Esp32Status) {
+    if (!next.connected) return;
+
+    const smokeKey = `${next.smokeValue}-${getTimeLabel()}`;
+
+    if (
+      typeof next.smokeValue === "number" &&
+      lastSavedSmokeKeyRef.current !== smokeKey
+    ) {
+      lastSavedSmokeKeyRef.current = smokeKey;
+
+      await saveSmokeReading({
+        id: `sr-${Date.now()}`,
+        level: getSmokeLevelFromAqi(next.smokeValue),
+        aqi: next.smokeValue,
+        time: getTimeLabel(),
+      });
+    }
+
+    const previous = previousStatusRef.current;
+
+    if (!previous) {
+      previousStatusRef.current = next;
+
+      if (next.fanOn) {
+        fanStartTimeRef.current = Date.now();
+
+        await saveFanEvent({
+          id: `fe-${Date.now()}`,
+          type: next.mode === "AUTO" ? "AUTO_TRIGGER" : "MANUAL_START",
+          title: next.mode === "AUTO" ? "Auto Trigger" : "Manual Start",
+          subtitle:
+            next.mode === "AUTO"
+              ? `Smoke detected: ${next.smokeValue ?? 0} AQI`
+              : "User initiated via app",
+          time: getTimeLabel(),
+          duration: "0s",
+        });
+      }
+
+      return;
+    }
+
+    if (!previous.fanOn && next.fanOn) {
+      fanStartTimeRef.current = Date.now();
+
+      await saveFanEvent({
+        id: `fe-${Date.now()}`,
+        type: next.mode === "AUTO" ? "AUTO_TRIGGER" : "MANUAL_START",
+        title: next.mode === "AUTO" ? "Auto Trigger" : "Manual Start",
+        subtitle:
+          next.mode === "AUTO"
+            ? `Smoke detected: ${next.smokeValue ?? 0} AQI`
+            : "User initiated via app",
+        time: getTimeLabel(),
+        duration: "0s",
+      });
+    }
+
+    if (previous.fanOn && !next.fanOn && previous.mode === "MANUAL") {
+      const durationMs = fanStartTimeRef.current
+        ? Date.now() - fanStartTimeRef.current
+        : 0;
+
+      await saveFanEvent({
+        id: `fe-${Date.now()}`,
+        type: "MANUAL_STOP",
+        title: "Manual Stop",
+        subtitle: "User turned fan off",
+        time: getTimeLabel(),
+        duration: formatDurationFromMs(durationMs),
+      });
+
+      fanStartTimeRef.current = null;
+    }
+
+    previousStatusRef.current = next;
+  }
+
   async function loadStatus(showLoader = false) {
     if (showLoader) setRefreshing(true);
 
     try {
       const data = await getEsp32Status();
       setStatus(data);
+      await saveDashboardHistory(data);
+
+      const threshold = data.threshold ?? 1800;
+      const isDanger =
+        data.connected &&
+        (data.sensor === "DETECTED" || (data.smokeValue ?? 0) > threshold);
+
+      if (isDanger) {
+        await startGasAlert(
+          `Smoke or gas detected. Current value: ${data.smokeValue ?? 0}`
+        );
+      } else {
+        stopGasAlert();
+      }
     } catch {
       setStatus((prev) => ({
         ...prev,
         connected: false,
       }));
+
+      stopGasAlert();
     } finally {
       if (showLoader) setRefreshing(false);
     }
@@ -72,7 +181,10 @@ export default function Dashboard() {
       loadStatus(false);
     }, POLL_MS);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      stopGasAlert();
+    };
   }, []);
 
   async function toggleMode() {
@@ -124,7 +236,7 @@ export default function Dashboard() {
           />
         </View>
 
-        <View className="mt-2 mb-4 items-center">
+        <View className="mb-4 mt-2 items-center">
           <GaugeRing value={smokeValue} max={120} strokeColor={air.ringColor} />
 
           <Text className="mt-5 text-base font-medium text-gray-500">
@@ -135,7 +247,11 @@ export default function Dashboard() {
           </Text>
 
           <Text className="mt-1 text-sm font-medium text-gray-400 italic">
-            {refreshing ? "Connecting..." : status.connected ? "Updated live" : "ESP32 disconnected"}
+            {refreshing
+              ? "Connecting..."
+              : status.connected
+                ? "Updated live"
+                : "ESP32 disconnected"}
           </Text>
         </View>
       </View>

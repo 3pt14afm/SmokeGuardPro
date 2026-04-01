@@ -31,15 +31,6 @@ export default function SystemHealthCard({ health }: { health: SystemHealth }) {
           </Text>
         </View>
 
-        <View className="flex-row items-center justify-between">
-          <View className="flex-row items-center gap-3">
-            <MaterialCommunityIcons name="thermometer" size={18} color="#22C55E" />
-            <Text className="text-lg font-bold text-gray-900">Internal Temperature</Text>
-          </View>
-          <Text className="text-[12px] font-semibold text-gray-500">
-            {health.internalTemp}
-          </Text>
-        </View>
       </View>
     </View>
   );

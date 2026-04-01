@@ -1,6 +1,7 @@
 export type Mode = "AUTO" | "MANUAL";
 
 export type SensorState = "NORMAL" | "DETECTED";
+
 export type RelayState = "ON" | "OFF";
 
 export type Esp32Status = {
@@ -12,11 +13,15 @@ export type Esp32Status = {
   connected: boolean;
   wifiName?: string;
   ip?: string;
+  threshold: number;
+  gasValue: number;
 };
 
+export type SystemCheckState = "OK" | "ISSUE";
+
 export type SystemStatus = {
-  powerSupply: "OK" | "ISSUE";
-  smokeSensor: "OK" | "ISSUE";
+  powerSupply: SystemCheckState;
+  smokeSensor: SystemCheckState;
   esp32: {
     connected: boolean;
     wifiName?: string;

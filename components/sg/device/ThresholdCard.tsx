@@ -11,7 +11,11 @@ export default function ThresholdCard({
   threshold: number;
   onChange: (v: number) => void;
 }) {
-  const sensitivityLabel = useMemo(() => getSensitivityLabel(threshold), [threshold]);
+  const safeThreshold = Math.max(1, Math.min(120, Math.round(threshold)));
+  const sensitivityLabel = useMemo(
+    () => getSensitivityLabel(safeThreshold),
+    [safeThreshold]
+  );
 
   return (
     <View className="mt-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -26,17 +30,19 @@ export default function ThresholdCard({
         </View>
 
         <View className="items-end">
-          <Text className="text-[22px] font-extrabold text-blue-600">{threshold}</Text>
-          <Text className="text-[11px] font-semibold text-gray-500">ug/m³</Text>
+          <Text className="text-[22px] font-extrabold text-blue-600">
+            {safeThreshold}
+          </Text>
+          <Text className="text-[11px] font-semibold text-gray-500">/ 120</Text>
         </View>
       </View>
 
       <View className="mt-4">
         <Slider
-          value={threshold}
-          onValueChange={(v) => onChange(Math.round(v))}
-          minimumValue={10}
-          maximumValue={100}
+          value={safeThreshold}
+          onSlidingComplete={(v) => onChange(Math.round(v))}
+          minimumValue={1}
+          maximumValue={120}
           step={1}
           minimumTrackTintColor="#2563EB"
           maximumTrackTintColor="#D1D5DB"

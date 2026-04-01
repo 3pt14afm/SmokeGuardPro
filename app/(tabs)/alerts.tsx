@@ -8,6 +8,7 @@ import AlertSettingsModal from "../../components/sg/alerts/AlertSettingsModal";
 import Screen from "../../components/sg/common/Screen";
 
 import { getEsp32Status } from "@/services/esp32";
+import { triggerGasAlert } from "@/services/alert";
 import { Esp32Status } from "@/types/dashboard";
 import { ActiveAlert, AlertItem, AlertSeverity, AlertType } from "../../types/alerts";
 
@@ -26,6 +27,19 @@ function formatDuration(ms: number) {
   if (minutes <= 0) return `${seconds}s`;
   return `${minutes}m ${seconds}s`;
 }
+
+const OFFLINE_STATUS: Esp32Status = {
+  mode: "AUTO",
+  sensor: "NORMAL",
+  relay: "OFF",
+  fanOn: false,
+  smokeValue: 0,
+  gasValue: 0,
+  threshold: 1800,
+  connected: false,
+  wifiName: undefined,
+  ip: undefined,
+};
 
 export default function AlertsScreen() {
   const [pushAlerts, setPushAlerts] = useState(true);
@@ -48,6 +62,14 @@ export default function AlertsScreen() {
   const previousStatusRef = useRef<Esp32Status | null>(null);
   const runningHistoryIdRef = useRef<string | null>(null);
   const runningHistoryStartRef = useRef<number | null>(null);
+  const runningHistoryTypeRef = useRef<AlertType | null>(null);
+  const smokePeakRef = useRef<number>(0);
+  const idCounterRef = useRef(0);
+
+  function makeUniqueId(prefix = "h") {
+    idCounterRef.current += 1;
+    return `${prefix}-${Date.now()}-${idCounterRef.current}`;
+  }
 
   function prependHistory(item: AlertItem) {
     setHistory((prev) => [item, ...prev]);
@@ -60,12 +82,26 @@ export default function AlertsScreen() {
       prev.map((item) =>
         item.id === id
           ? {
-            ...item,
-            duration,
-          }
+              ...item,
+              duration,
+            }
           : item
       )
     );
+  }
+
+  function updateHistoryItem(id: string | null, patch: Partial<AlertItem>) {
+    if (!id) return;
+
+    setHistory((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    );
+  }
+
+  function endRunningState() {
+    runningHistoryIdRef.current = null;
+    runningHistoryStartRef.current = null;
+    runningHistoryTypeRef.current = null;
   }
 
   function beginRunningState(
@@ -74,10 +110,11 @@ export default function AlertsScreen() {
     severity: AlertSeverity,
     extras?: Partial<AlertItem>
   ) {
-    const id = `h-${Date.now()}`;
+    const id = makeUniqueId("h");
 
     runningHistoryIdRef.current = id;
     runningHistoryStartRef.current = Date.now();
+    runningHistoryTypeRef.current = type;
 
     prependHistory({
       id,
@@ -91,6 +128,16 @@ export default function AlertsScreen() {
     });
   }
 
+  function restartRunningState(
+    type: AlertType,
+    title: string,
+    severity: AlertSeverity,
+    extras?: Partial<AlertItem>
+  ) {
+    endRunningState();
+    beginRunningState(type, title, severity, extras);
+  }
+
   function addInstantHistory(
     type: AlertType,
     title: string,
@@ -98,7 +145,7 @@ export default function AlertsScreen() {
     extras?: Partial<AlertItem>
   ) {
     prependHistory({
-      id: `h-${Date.now()}`,
+      id: makeUniqueId("h"),
       type,
       title,
       severity,
@@ -115,8 +162,8 @@ export default function AlertsScreen() {
 
   function clearHistory() {
     setHistory([]);
-    runningHistoryIdRef.current = null;
-    runningHistoryStartRef.current = null;
+    endRunningState();
+    smokePeakRef.current = 0;
   }
 
   function onTogglePush(v: boolean) {
@@ -128,6 +175,11 @@ export default function AlertsScreen() {
 
   function onToggleAudible(v: boolean) {
     setAudibleAlarm(v);
+  }
+
+  async function notifyHighGas(message: string) {
+    if (!pushAlerts && !audibleAlarm) return;
+    await triggerGasAlert(message);
   }
 
   useEffect(() => {
@@ -143,65 +195,10 @@ export default function AlertsScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  function processStatus(status: Esp32Status) {
-    const previous = previousStatusRef.current;
-
-    if (!previous) {
-      previousStatusRef.current = status;
-
-      if (!status.connected) {
-        setActiveAlert({
-          id: `active-disconnect-${Date.now()}`,
-          type: "SYSTEM_OFFLINE",
-          title: "ACTIVE ALERT: DEVICE DISCONNECTED",
-          message: "ESP32 is unreachable. Live monitoring is temporarily unavailable.",
-          timestamp: "Just now",
-          severity: "warning",
-        });
-
-        beginRunningState("SYSTEM_OFFLINE", "Device Disconnected", "warning");
-        return;
-      }
-
-      if (status.sensor === "DETECTED") {
-        setActiveAlert({
-          id: `active-smoke-${Date.now()}`,
-          type: "HIGH_SMOKE",
-          title: "ACTIVE ALERT: HIGH SMOKE",
-          message:
-            status.mode === "AUTO" && status.fanOn
-              ? "Smoke/gas exceeded safe threshold. Fan has been automatically activated."
-              : "Smoke/gas detected.",
-          timestamp: "Just now",
-          severity: "danger",
-        });
-
-        beginRunningState("HIGH_SMOKE", "High Smoke Detected", "danger", {
-          peak: status.smokeValue > 0 ? `${status.smokeValue}` : "Detected",
-        });
-        return;
-      }
-
-      if (status.mode === "MANUAL" && status.fanOn) {
-        beginRunningState("INFO", "Manual Fan Turned On", "info");
-        return;
-      }
-
-      if (status.mode === "MANUAL" && !status.fanOn) {
-        beginRunningState("INFO", "Manual Fan Turned Off", "info");
-        return;
-      }
-
-      if (status.mode === "AUTO" && !status.fanOn) {
-        beginRunningState("SYSTEM_NORMAL", "System Returned to Normal", "info");
-      }
-
-      return;
-    }
-
-    if (previous.connected && !status.connected) {
+  async function processInitialStatus(status: Esp32Status) {
+    if (!status.connected) {
       setActiveAlert({
-        id: `active-disconnect-${Date.now()}`,
+        id: makeUniqueId("active-disconnect"),
         type: "SYSTEM_OFFLINE",
         title: "ACTIVE ALERT: DEVICE DISCONNECTED",
         message: "ESP32 is unreachable. Live monitoring is temporarily unavailable.",
@@ -210,21 +207,14 @@ export default function AlertsScreen() {
       });
 
       beginRunningState("SYSTEM_OFFLINE", "Device Disconnected", "warning");
-      previousStatusRef.current = status;
       return;
     }
 
-    if (!previous.connected && status.connected) {
-      if (activeAlert?.type === "SYSTEM_OFFLINE") {
-        setActiveAlert(null);
-      }
+    if (status.sensor === "DETECTED") {
+      smokePeakRef.current = status.smokeValue ?? 0;
 
-      beginRunningState("SYSTEM_NORMAL", "Device Reconnected", "info");
-    }
-
-    if (previous.sensor !== "DETECTED" && status.sensor === "DETECTED") {
       setActiveAlert({
-        id: `active-smoke-${Date.now()}`,
+        id: makeUniqueId("active-smoke"),
         type: "HIGH_SMOKE",
         title: "ACTIVE ALERT: HIGH SMOKE",
         message:
@@ -236,16 +226,121 @@ export default function AlertsScreen() {
       });
 
       beginRunningState("HIGH_SMOKE", "High Smoke Detected", "danger", {
-        peak: status.smokeValue > 0 ? `${status.smokeValue}` : "Detected",
+        peak: `${smokePeakRef.current > 0 ? smokePeakRef.current : status.gasValue ?? "Detected"}`,
       });
+
+      await notifyHighGas(
+        status.mode === "AUTO" && status.fanOn
+          ? "Smoke detected. Fan activated automatically."
+          : "Smoke or gas detected."
+      );
+
+      if (status.mode === "AUTO" && status.fanOn) {
+        addInstantHistory("AUTO_FAN_ON", "Automatic Fan Activation", "info");
+      }
+      return;
+    }
+
+    if (status.mode === "MANUAL" && status.fanOn) {
+      beginRunningState("INFO", "Manual Fan Turned On", "info");
+      return;
+    }
+
+    if (status.mode === "MANUAL" && !status.fanOn) {
+      beginRunningState("INFO", "Manual Fan Turned Off", "info");
+      return;
+    }
+
+    beginRunningState("SYSTEM_NORMAL", "System Returned to Normal", "info");
+  }
+
+  async function processStatus(status: Esp32Status) {
+    const previous = previousStatusRef.current;
+
+    if (!previous) {
+      previousStatusRef.current = status;
+      await processInitialStatus(status);
+      return;
+    }
+
+    if (previous.connected && !status.connected) {
+      setActiveAlert({
+        id: makeUniqueId("active-disconnect"),
+        type: "SYSTEM_OFFLINE",
+        title: "ACTIVE ALERT: DEVICE DISCONNECTED",
+        message: "ESP32 is unreachable. Live monitoring is temporarily unavailable.",
+        timestamp: "Just now",
+        severity: "warning",
+      });
+
+      restartRunningState("SYSTEM_OFFLINE", "Device Disconnected", "warning");
+      previousStatusRef.current = status;
+      return;
+    }
+
+    if (!previous.connected && status.connected) {
+      if (activeAlert?.type === "SYSTEM_OFFLINE") {
+        setActiveAlert(null);
+      }
+
+      restartRunningState("SYSTEM_NORMAL", "Device Reconnected", "info");
+      previousStatusRef.current = status;
+      return;
+    }
+
+    if (previous.sensor !== "DETECTED" && status.sensor === "DETECTED") {
+      smokePeakRef.current = status.smokeValue ?? 0;
+
+      setActiveAlert({
+        id: makeUniqueId("active-smoke"),
+        type: "HIGH_SMOKE",
+        title: "ACTIVE ALERT: HIGH SMOKE",
+        message:
+          status.mode === "AUTO" && status.fanOn
+            ? "Smoke/gas exceeded safe threshold. Fan has been automatically activated."
+            : "Smoke/gas detected.",
+        timestamp: "Just now",
+        severity: "danger",
+      });
+
+      restartRunningState("HIGH_SMOKE", "High Smoke Detected", "danger", {
+        peak: `${smokePeakRef.current > 0 ? smokePeakRef.current : status.gasValue ?? "Detected"}`,
+      });
+
+      await notifyHighGas(
+        status.mode === "AUTO" && status.fanOn
+          ? "Smoke detected. Fan activated automatically."
+          : "Smoke or gas detected."
+      );
+    }
+
+    if (status.sensor === "DETECTED" && runningHistoryTypeRef.current === "HIGH_SMOKE") {
+      smokePeakRef.current = Math.max(smokePeakRef.current, status.smokeValue ?? 0);
+
+      updateHistoryItem(runningHistoryIdRef.current, {
+        peak: `${smokePeakRef.current > 0 ? smokePeakRef.current : status.gasValue ?? "Detected"}`,
+      });
+
+      if (activeAlert?.type === "HIGH_SMOKE" && status.mode === "AUTO" && status.fanOn) {
+        setActiveAlert({
+          ...activeAlert,
+          message: "Smoke/gas exceeded safe threshold. Fan has been automatically activated.",
+        });
+      }
+
+      if ((status.smokeValue ?? 0) >= 100) {
+        await notifyHighGas("Danger! Gas level is very high.");
+      }
     }
 
     if (previous.sensor === "DETECTED" && status.sensor !== "DETECTED") {
+      smokePeakRef.current = 0;
+
       if (activeAlert?.type === "HIGH_SMOKE") {
         setActiveAlert(null);
       }
 
-      beginRunningState("SYSTEM_NORMAL", "System Returned to Normal", "info");
+      restartRunningState("SYSTEM_NORMAL", "System Returned to Normal", "info");
     }
 
     if (
@@ -269,7 +364,7 @@ export default function AlertsScreen() {
       status.fanOn === true &&
       status.mode === "MANUAL"
     ) {
-      beginRunningState("INFO", "Manual Fan Turned On", "info");
+      restartRunningState("INFO", "Manual Fan Turned On", "info");
     }
 
     if (
@@ -277,7 +372,17 @@ export default function AlertsScreen() {
       status.fanOn === false &&
       previous.mode === "MANUAL"
     ) {
-      beginRunningState("INFO", "Manual Fan Turned Off", "info");
+      restartRunningState("INFO", "Manual Fan Turned Off", "info");
+    }
+
+    if (
+      previous.mode !== status.mode &&
+      status.mode === "AUTO" &&
+      status.sensor === "NORMAL" &&
+      !status.fanOn &&
+      status.connected
+    ) {
+      restartRunningState("SYSTEM_NORMAL", "System Returned to Normal", "info");
     }
 
     previousStatusRef.current = status;
@@ -286,16 +391,9 @@ export default function AlertsScreen() {
   async function pollStatus() {
     try {
       const status = await getEsp32Status();
-      processStatus(status);
+      await processStatus(status);
     } catch {
-      processStatus({
-        mode: "AUTO",
-        sensor: "NORMAL",
-        relay: "OFF",
-        fanOn: false,
-        smokeValue: 0,
-        connected: false,
-      });
+      await processStatus(OFFLINE_STATUS);
     }
   }
 
