@@ -17,6 +17,8 @@ import {
 } from "@/services/esp32";
 import {
   formatDurationFromMs,
+  getDateLabel,
+  getFilterLifePercent,
   getSmokeLevelFromAqi,
   getTimeLabel,
   saveFanEvent,
@@ -25,6 +27,7 @@ import {
 import { startGasAlert, stopGasAlert } from "@/utils/notifications";
 
 const POLL_MS = 2000;
+const MAX_FILTER_HOURS = 100;
 
 const FALLBACK_STATUS: Esp32Status = {
   mode: "AUTO",
@@ -43,7 +46,7 @@ export default function Dashboard() {
   const [status, setStatus] = useState<Esp32Status>(FALLBACK_STATUS);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(true);
-  const [filterLife] = useState("84%");
+  const [filterLife, setFilterLife] = useState("100%");
 
   const previousStatusRef = useRef<Esp32Status | null>(null);
   const fanStartTimeRef = useRef<number | null>(null);
@@ -63,10 +66,20 @@ export default function Dashboard() {
 
   const air = useMemo(() => getAirState(smokeValue), [smokeValue]);
 
+  async function loadFilterLife() {
+    try {
+      const remainingPercent = await getFilterLifePercent(MAX_FILTER_HOURS);
+      setFilterLife(`${remainingPercent}%`);
+    } catch (error) {
+      console.error("Failed to load filter life:", error);
+      setFilterLife("N/A");
+    }
+  }
+
   async function saveDashboardHistory(next: Esp32Status) {
     if (!next.connected) return;
 
-    const smokeKey = `${next.smokeValue}-${getTimeLabel()}`;
+    const smokeKey = `${next.smokeValue}-${getTimeLabel()}-${getDateLabel()}`;
 
     if (
       typeof next.smokeValue === "number" &&
@@ -79,6 +92,7 @@ export default function Dashboard() {
         level: getSmokeLevelFromAqi(next.smokeValue),
         aqi: next.smokeValue,
         time: getTimeLabel(),
+        date: getDateLabel(),
       });
     }
 
@@ -99,7 +113,9 @@ export default function Dashboard() {
               ? `Smoke detected: ${next.smokeValue ?? 0} AQI`
               : "User initiated via app",
           time: getTimeLabel(),
-          duration: "0s",
+          date: getDateLabel(),
+          duration: "--",
+          durationMs: 0,
         });
       }
 
@@ -118,25 +134,32 @@ export default function Dashboard() {
             ? `Smoke detected: ${next.smokeValue ?? 0} AQI`
             : "User initiated via app",
         time: getTimeLabel(),
-        duration: "0s",
+        date: getDateLabel(),
+        duration: "--",
+        durationMs: 0,
       });
     }
 
-    if (previous.fanOn && !next.fanOn && previous.mode === "MANUAL") {
+    if (previous.fanOn && !next.fanOn) {
       const durationMs = fanStartTimeRef.current
         ? Date.now() - fanStartTimeRef.current
         : 0;
 
+      const wasAuto = previous.mode === "AUTO";
+
       await saveFanEvent({
         id: `fe-${Date.now()}`,
-        type: "MANUAL_STOP",
-        title: "Manual Stop",
-        subtitle: "User turned fan off",
+        type: wasAuto ? "AUTO_STOP" : "MANUAL_STOP",
+        title: wasAuto ? "Auto Stop" : "Manual Stop",
+        subtitle: wasAuto ? "Fan stopped automatically" : "User turned fan off",
         time: getTimeLabel(),
+        date: getDateLabel(),
         duration: formatDurationFromMs(durationMs),
+        durationMs,
       });
 
       fanStartTimeRef.current = null;
+      await loadFilterLife();
     }
 
     previousStatusRef.current = next;
@@ -175,6 +198,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
+    loadFilterLife();
     loadStatus(true);
 
     const timer = setInterval(() => {
@@ -194,9 +218,10 @@ export default function Dashboard() {
     try {
       await sendModeToEsp32(next);
       await loadStatus();
-    } catch {
-      Alert.alert("Mode change failed", "Couldn’t change mode. Check Wi-Fi connection.");
-    } finally {
+    }  catch (error) {
+  console.log("Mode change error:", error);
+  Alert.alert("Mode change failed", String(error));
+} finally {
       setBusy(false);
     }
   }
@@ -214,7 +239,10 @@ export default function Dashboard() {
       await sendFanToEsp32(next);
       await loadStatus();
     } catch {
-      Alert.alert("Fan control failed", "Couldn’t update fan state. Check Wi-Fi connection.");
+      Alert.alert(
+        "Fan control failed",
+        "Couldn’t update fan state. Check Wi-Fi connection."
+      );
     } finally {
       setBusy(false);
     }
@@ -223,7 +251,9 @@ export default function Dashboard() {
   return (
     <Screen>
       <Text className="text-lg font-semibold text-gray-500">Kitchen Safety</Text>
-      <Text className="mt-2 text-5xl font-extrabold text-gray-900">Dashboard</Text>
+      <Text className="mt-2 text-5xl font-extrabold text-gray-900">
+        Dashboard
+      </Text>
 
       <View className="mt-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <View className="flex-row items-center justify-between">
@@ -312,7 +342,9 @@ export default function Dashboard() {
             />
           }
           rightTop={status.sensor}
-          rightTopColor={status.sensor === "DETECTED" ? "text-red-600" : "text-emerald-600"}
+          rightTopColor={
+            status.sensor === "DETECTED" ? "text-red-600" : "text-emerald-600"
+          }
         />
 
         <StatusRow
@@ -324,8 +356,12 @@ export default function Dashboard() {
               color={systemStatus.esp32.connected ? "#22C55E" : "#EF4444"}
             />
           }
-          rightTop={systemStatus.esp32.connected ? "CONNECTED" : "DISCONNECTED"}
-          rightTopColor={systemStatus.esp32.connected ? "text-emerald-600" : "text-red-600"}
+          rightTop={
+            systemStatus.esp32.connected ? "CONNECTED" : "DISCONNECTED"
+          }
+          rightTopColor={
+            systemStatus.esp32.connected ? "text-emerald-600" : "text-red-600"
+          }
           rightBottom={
             systemStatus.esp32.wifiName
               ? `WiFi: ${systemStatus.esp32.wifiName}`
